@@ -118,6 +118,23 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 else localLikedPosts.add(post.postId)
                 _likedPostIds.postValue(localLikedPosts.toSet())
 
+                // Optimistically patch likeCount in postsState so the UI updates
+                // immediately. FieldValue.increment is a server transform — Firestore's
+                // local pending-write snapshot keeps the original value, meaning DiffUtil
+                // would see no change and skip the rebind until the server round-trip
+                // completes. Patching here gives instant feedback the same way
+                // commentCountDeltas does for comments.
+                val currentPosts = (_postsState.value as? Resource.Success)?.data
+                if (currentPosts != null) {
+                    val updatedPosts = currentPosts.map { p ->
+                        if (p.postId == post.postId) {
+                            val newCount = if (isLiked) maxOf(0, p.likeCount - 1) else p.likeCount + 1
+                            p.copy(likeCount = newCount)
+                        } else p
+                    }
+                    _postsState.postValue(Resource.Success(updatedPosts))
+                }
+
                 val currentUser = _currentUser.value
                 val result = if (isLiked) {
                     postRepository.unlikePost(post.postId, currentUid)
@@ -130,14 +147,28 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 if (result is Resource.Error) {
+                    // Roll back both the liked-set and the optimistic count patch
                     if (isLiked) localLikedPosts.add(post.postId)
                     else localLikedPosts.remove(post.postId)
                     _likedPostIds.postValue(localLikedPosts.toSet())
+
+                    val rollbackPosts = (_postsState.value as? Resource.Success)?.data
+                    if (rollbackPosts != null) {
+                        val revertedPosts = rollbackPosts.map { p ->
+                            if (p.postId == post.postId) {
+                                val revertedCount = if (isLiked) p.likeCount + 1 else maxOf(0, p.likeCount - 1)
+                                p.copy(likeCount = revertedCount)
+                            } else p
+                        }
+                        _postsState.postValue(Resource.Success(revertedPosts))
+                    }
+
                     _likeState.postValue(result)
                 }
             }
         }
     }
+
 
     fun checkLikedPosts(postIds: List<String>) {
         viewModelScope.launch {

@@ -144,16 +144,12 @@ class PostAdapter(
             }
             binding.tvCaption.text = captionText
 
-            val displayLikeCount = when {
-                isLiked && post.likeCount == 0 -> 1
-                !isLiked && post.likeCount > 0 -> post.likeCount - 1
-                else -> post.likeCount
-            }
+            val displayLikeCount = post.likeCount
 
             // like count
-            binding.tvLikeCount.text = when {
-                displayLikeCount == 0 -> "Be the first to like this"
-                displayLikeCount == 1 -> "1 like"
+            binding.tvLikeCount.text = when (displayLikeCount) {
+                0 -> "Be the first to like this"
+                1 -> "1 like"
                 else -> "$displayLikeCount likes"
             }
 
