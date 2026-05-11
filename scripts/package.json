@@ -1,0 +1,12 @@
+{
+  "name": "medium-seed",
+  "version": "1.0.0",
+  "description": "Firebase seed scripts for Medium app",
+  "type": "module",
+  "scripts": {
+    "seed:posts": "node seedPosts.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.0.0"
+  }
+}
