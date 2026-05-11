@@ -6,6 +6,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
+import androidx.fragment.app.activityViewModels
 import androidx.fragment.app.viewModels
 import androidx.media3.common.util.UnstableApi
 import androidx.navigation.fragment.findNavController
@@ -31,7 +32,7 @@ private const val ARG_PARAM2 = "param2"
 class HomeFragment : Fragment() {
     private var _binding: FragmentHomeBinding? = null
     private val binding get() = _binding!!
-    private val viewModel: HomeViewModel by viewModels{
+    private val viewModel: HomeViewModel by activityViewModels {
         HomeViewModelFactory(requireActivity().application)
     }
     private lateinit var postAdapter: PostAdapter
@@ -129,6 +130,9 @@ class HomeFragment : Fragment() {
         }
         viewModel.likedPostIds.observe(viewLifecycleOwner) { likedIds ->
             postAdapter.setLikedPosts(likedIds)
+        }
+        viewModel.commentCountDeltas.observe(viewLifecycleOwner) { deltas ->
+            postAdapter.setCommentCountDeltas(deltas)
         }
         viewModel.likeState.observe(viewLifecycleOwner){ resource ->
             if (resource is Resource.Error) {

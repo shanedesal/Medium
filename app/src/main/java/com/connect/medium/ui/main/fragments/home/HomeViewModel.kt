@@ -6,6 +6,7 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
 import com.connect.medium.data.local.AppDatabase
+import com.connect.medium.data.model.Comment
 import com.connect.medium.data.model.Post
 import com.connect.medium.data.model.User
 import com.connect.medium.data.remote.FirestoreDataSource
@@ -13,7 +14,12 @@ import com.connect.medium.data.repository.AuthRepository
 import com.connect.medium.data.repository.PostRepository
 import com.connect.medium.data.repository.UserRepository
 import com.connect.medium.utils.Resource
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.util.UUID
 
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -24,18 +30,35 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val userRepository = UserRepository(firestoreDataSource, db.userDao(), db.followDao())
     private val _currentUser = MutableLiveData<User?>()
 
-    val currentUid = authRepository.getCurrentUser()?.uid ?: ""
+    val currentUid = authRepository.getCurrentUser()?.uid
+        ?: throw IllegalStateException("HomeViewModel requires a logged in user")
 
+    // ─── Feed ────────────────────────────────────────────
     private val _postsState = MutableLiveData<Resource<List<Post>>>()
     val postsState: LiveData<Resource<List<Post>>> = _postsState
 
+    // ─── Likes ───────────────────────────────────────────
     private val _likeState = MutableLiveData<Resource<Unit>>()
     val likeState: LiveData<Resource<Unit>> = _likeState
-
     private val _likedPostIds = MutableLiveData<Set<String>>()
     val likedPostIds: LiveData<Set<String>> = _likedPostIds
 
-    // tracks optimistic like state locally
+    // ─── Comments ────────────────────────────────────────
+    private val _commentsState = MutableLiveData<Resource<List<Comment>>>()
+    val commentsState: LiveData<Resource<List<Comment>>> = _commentsState
+
+    private val _addCommentState = MutableLiveData<Resource<Unit>>()
+    val addCommentState: LiveData<Resource<Unit>> = _addCommentState
+
+    // Optimistic comment count: postId → expected count after posting.
+    // Cleared per-post when Firestore confirms the new count.
+    private val expectedCommentCounts = mutableMapOf<String, Int>()
+    private val _commentCountDeltas = MutableLiveData<Map<String, Int>>(emptyMap())
+    val commentCountDeltas: LiveData<Map<String, Int>> = _commentCountDeltas
+
+    private var feedJob: Job? = null
+    private var commentsJob: Job? = null
+    private val likeMutex = Mutex()
     private val localLikedPosts = mutableSetOf<String>()
 
     init {
@@ -43,64 +66,144 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         loadCurrentUser()
     }
 
-    fun loadFeed() {
-        _postsState.value = Resource.Loading
-        viewModelScope.launch {
-            val minDelay = launch { kotlinx.coroutines.delay(800) }
+    // ─── Feed ────────────────────────────────────────────
 
+    fun loadFeed() {
+        feedJob?.cancel()
+        feedJob = viewModelScope.launch {
+            _postsState.value = Resource.Loading
+            delay(800)
             postRepository.observeFeedPosts()
                 .collect { posts ->
-                    minDelay.join() // wait for at least 800ms before showing data
-                    _postsState.value = Resource.Success(posts)
+                    // Clear deltas for posts where Firestore has confirmed the updated count
+                    var deltasChanged = false
+                    posts.forEach { post ->
+                        val expected = expectedCommentCounts[post.postId]
+                        if (expected != null && post.commentCount >= expected) {
+                            expectedCommentCounts.remove(post.postId)
+                            deltasChanged = true
+                        }
+                    }
+                    if (deltasChanged) {
+                        _commentCountDeltas.postValue(buildDeltaMap(posts))
+                    }
+                    _postsState.postValue(Resource.Success(posts))
                 }
         }
     }
+
+    private fun buildDeltaMap(posts: List<Post>): Map<String, Int> {
+        return posts.mapNotNull { post ->
+            val expected = expectedCommentCounts[post.postId] ?: return@mapNotNull null
+            val delta = expected - post.commentCount
+            if (delta > 0) post.postId to delta else null
+        }.toMap()
+    }
+
     private fun loadCurrentUser() {
         viewModelScope.launch {
             userRepository.observeUser(currentUid)
-                .collect { _currentUser.value = it }
+                .collect { _currentUser.postValue(it) }
         }
     }
 
+    // ─── Likes ───────────────────────────────────────────
+
     fun toggleLike(post: Post) {
         viewModelScope.launch {
-            val isLiked = localLikedPosts.contains(post.postId)
+            likeMutex.withLock {
+                val isLiked = localLikedPosts.contains(post.postId)
 
-            // optimistic update
-            if (isLiked) localLikedPosts.remove(post.postId)
-            else localLikedPosts.add(post.postId)
-            _likedPostIds.value = localLikedPosts.toSet()
+                if (isLiked) localLikedPosts.remove(post.postId)
+                else localLikedPosts.add(post.postId)
+                _likedPostIds.postValue(localLikedPosts.toSet())
 
-            // need current user for notification
-            val currentUser = _currentUser.value
-
-            val result = if (isLiked) {
-                postRepository.unlikePost(post.postId, currentUid)
-            } else {
-                if (currentUser != null) {
-                    postRepository.likePost(post.postId, currentUid, post.authorUid, currentUser)
+                val currentUser = _currentUser.value
+                val result = if (isLiked) {
+                    postRepository.unlikePost(post.postId, currentUid)
                 } else {
-                    Resource.Error("User not found")
+                    if (currentUser != null) {
+                        postRepository.likePost(post.postId, currentUid, post.authorUid, currentUser)
+                    } else {
+                        Resource.Error("User not found")
+                    }
                 }
-            }
 
-            // rollback if failed
-            if (result is Resource.Error) {
-                if (isLiked) localLikedPosts.add(post.postId)
-                else localLikedPosts.remove(post.postId)
-                _likedPostIds.value = localLikedPosts.toSet()
-                _likeState.value = result
+                if (result is Resource.Error) {
+                    if (isLiked) localLikedPosts.add(post.postId)
+                    else localLikedPosts.remove(post.postId)
+                    _likedPostIds.postValue(localLikedPosts.toSet())
+                    _likeState.postValue(result)
+                }
             }
         }
     }
 
     fun checkLikedPosts(postIds: List<String>) {
         viewModelScope.launch {
-            postIds.forEach { postId ->
-                val isLiked = postRepository.isPostLikedByUser(postId, currentUid)
-                if (isLiked) localLikedPosts.add(postId)
+            likeMutex.withLock {
+                val unknownPostIds = postIds.filter { it !in localLikedPosts }
+                unknownPostIds.forEach { postId ->
+                    val isLiked = postRepository.isPostLikedByUser(postId, currentUid)
+                    if (isLiked) localLikedPosts.add(postId)
+                }
+                _likedPostIds.postValue(localLikedPosts.toSet())
             }
-            _likedPostIds.value = localLikedPosts.toSet()
+        }
+    }
+
+    // ─── Comments ────────────────────────────────────────
+
+    fun loadComments(postId: String) {
+        commentsJob?.cancel()
+        commentsJob = viewModelScope.launch {
+            postRepository.observeComments(postId)
+                .collect { comments ->
+                    _commentsState.postValue(Resource.Success(comments))
+                }
+        }
+    }
+
+    fun stopObservingComments() {
+        commentsJob?.cancel()
+        commentsJob = null
+    }
+
+    fun addComment(postId: String, postAuthorUid: String, text: String) {
+        if (text.isBlank()) return
+        _addCommentState.value = Resource.Loading
+
+        viewModelScope.launch {
+            val user = _currentUser.value
+            if (user == null) {
+                _addCommentState.value = Resource.Error("User not found")
+                return@launch
+            }
+
+            // Optimistic: show +1 immediately before Firestore round-trip
+            val currentCount = (postsState.value as? Resource.Success)
+                ?.data?.find { it.postId == postId }?.commentCount ?: 0
+            expectedCommentCounts[postId] = currentCount + 1
+            _commentCountDeltas.postValue(mapOf(postId to 1))
+
+            val comment = Comment(
+                commentId = UUID.randomUUID().toString(),
+                postId = postId,
+                authorUid = currentUid,
+                authorUsername = user.username,
+                authorProfileImageUrl = user.profileImageUrl,
+                text = text,
+                createdAt = System.currentTimeMillis()
+            )
+
+            val result = postRepository.addComment(comment, postAuthorUid, user)
+            _addCommentState.postValue(result)
+
+            // Roll back optimistic delta if the write failed
+            if (result is Resource.Error) {
+                expectedCommentCounts.remove(postId)
+                _commentCountDeltas.postValue(emptyMap())
+            }
         }
     }
 }

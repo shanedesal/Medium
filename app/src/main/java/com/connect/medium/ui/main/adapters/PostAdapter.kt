@@ -4,6 +4,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import androidx.media3.common.util.UnstableApi
+import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
 import com.connect.medium.R
@@ -23,26 +24,41 @@ class PostAdapter(
 
     private var posts = listOf<Post>()
     private var likedPosts = mutableSetOf<String>()
+    private var commentCountDeltas = mapOf<String, Int>()
+
 
     init {
         setHasStableIds(false)
     }
 
     fun submitList(newPosts: List<Post>) {
+        val diff = DiffUtil.calculateDiff(PostDiffCallback(posts, newPosts))
         posts = newPosts
-        notifyDataSetChanged()
+        diff.dispatchUpdatesTo(this)
     }
 
     fun setLikedPosts(liked: Set<String>) {
+        val oldLiked = likedPosts.toSet()
         likedPosts = liked.toMutableSet()
-        notifyDataSetChanged()
+        posts.forEachIndexed { index, post ->
+            if (oldLiked.contains(post.postId) != liked.contains(post.postId)) {
+                notifyItemChanged(index + 1) // +1 for header
+            }
+        }
     }
 
     fun updateLike(postId: String, isLiked: Boolean) {
         if (isLiked) likedPosts.add(postId) else likedPosts.remove(postId)
         val index = posts.indexOfFirst { it.postId == postId }
-        if (index != -1) notifyItemChanged(index)
+        if (index != -1) notifyItemChanged(index + 1)
     }
+
+    fun setCommentCountDeltas(deltas: Map<String, Int>) {
+        commentCountDeltas = deltas
+        notifyDataSetChanged()
+    }
+
+
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
         return if (viewType == VIEW_TYPE_HEADER) {
@@ -61,7 +77,7 @@ class PostAdapter(
         when (holder) {
             is PostViewHolder -> {
                 val post = posts[position - 1]
-                holder.bind(post)
+                holder.bind(post, likedPosts)
             }
             is HeaderViewHolder -> {}
         }
@@ -80,6 +96,7 @@ class PostAdapter(
 
             holder.pageChangeCallback?.let {
                 holder.binding.viewPagerMedia.unregisterOnPageChangeCallback(it)
+                holder.isCallbackRegistered = false
             }
             holder.pageChangeCallback = null
 
@@ -109,14 +126,15 @@ class PostAdapter(
         val binding: ItemPostBinding  // changed to val so onViewRecycled can access it
     ) : RecyclerView.ViewHolder(binding.root) {
 
-        public var pageChangeCallback: ViewPager2.OnPageChangeCallback? = null
+        var pageChangeCallback: ViewPager2.OnPageChangeCallback? = null
+        var isCallbackRegistered = false
 
-        fun bind(post: Post) {
+
+        fun bind(post: Post, currentLikedPosts: Set<String> = emptySet()) {
             binding.tvUsername.text = post.authorUsername
             binding.tvTimestamp.text = getRelativeTime(post.createdAt)
 
-            binding.tvUsername.setOnClickListener { onProfileClick(post.authorUid) }
-
+            val isLiked = currentLikedPosts.contains(post.postId)
             val captionText = android.text.SpannableStringBuilder()
             val boldSpan = android.text.style.StyleSpan(android.graphics.Typeface.BOLD)
             captionText.append(post.authorUsername)
@@ -126,18 +144,25 @@ class PostAdapter(
             }
             binding.tvCaption.text = captionText
 
+            val displayLikeCount = when {
+                isLiked && post.likeCount == 0 -> 1
+                !isLiked && post.likeCount > 0 -> post.likeCount - 1
+                else -> post.likeCount
+            }
+
             // like count
             binding.tvLikeCount.text = when {
-                post.likeCount == 0 -> "Be the first to like this"
-                post.likeCount == 1 -> "1 like"
-                else -> "${post.likeCount} likes"
+                displayLikeCount == 0 -> "Be the first to like this"
+                displayLikeCount == 1 -> "1 like"
+                else -> "$displayLikeCount likes"
             }
 
             // comment count
+            val displayCommentCount = post.commentCount + (commentCountDeltas[post.postId] ?: 0)
             binding.tvCommentCount.text = when {
-                post.commentCount == 0 -> ""
-                post.commentCount == 1 -> "View 1 comment"
-                else -> "View all ${post.commentCount} comments"
+                displayCommentCount == 0 -> ""
+                displayCommentCount == 1 -> "View 1 comment"
+                else -> "View all $displayCommentCount comments"
             }
             binding.tvCommentCount.setOnClickListener { onCommentClick(post) }
 
@@ -178,43 +203,45 @@ class PostAdapter(
 
             binding.viewPagerMedia.offscreenPageLimit = 1
 
-            pageChangeCallback?.let {
-                binding.viewPagerMedia.unregisterOnPageChangeCallback(it)
+            if (isCallbackRegistered) {
+                pageChangeCallback?.let {
+                    binding.viewPagerMedia.unregisterOnPageChangeCallback(it)
+                }
+                isCallbackRegistered = false
             }
             pageChangeCallback = null
 
-            (binding.viewPagerMedia.adapter as? PostMediaAdapter)?.let {
-                val rv = binding.viewPagerMedia.getChildAt(0) as? RecyclerView
-                rv?.let { recyclerView ->
-                    for (i in 0 until recyclerView.childCount) {
-                        val holder = recyclerView.getChildViewHolder(recyclerView.getChildAt(i))
-                        when (holder) {
-                            is PostMediaAdapter.VideoViewHolder -> holder.release()
-                            is PostMediaAdapter.ImageViewHolder -> holder.clear()
+            val currentAdapter = binding.viewPagerMedia.adapter as? PostMediaAdapter
+            if (currentAdapter == null || currentAdapter.mediaUrls != post.mediaUrls) {
+                currentAdapter?.let {
+                    val rv = binding.viewPagerMedia.getChildAt(0) as? RecyclerView
+                    rv?.let {
+                        for (i in 0 until it.childCount) {
+                            when (val holder = it.getChildViewHolder(it.getChildAt(i))) {
+                                is PostMediaAdapter.VideoViewHolder -> holder.release()
+                                is PostMediaAdapter.ImageViewHolder -> holder.clear()
+                            }
                         }
                     }
                 }
+                binding.viewPagerMedia.adapter = PostMediaAdapter(post.mediaUrls, post.mediaTypes)
             }
 
-            binding.viewPagerMedia.adapter = null
-            val mediaAdapter = PostMediaAdapter(post.mediaUrls, post.mediaTypes)
-            binding.viewPagerMedia.adapter = mediaAdapter
-
-            pageChangeCallback = object : ViewPager2.OnPageChangeCallback() {
+            val callback = object : ViewPager2.OnPageChangeCallback() {
                 override fun onPageSelected(position: Int) {
                     super.onPageSelected(position)
                     val rv = binding.viewPagerMedia.getChildAt(0) as? RecyclerView
                     rv?.let {
                         for (i in 0 until it.childCount) {
                             val holder = it.getChildViewHolder(it.getChildAt(i))
-                            if (holder is PostMediaAdapter.VideoViewHolder) {
-                                holder.pause()
-                            }
+                            if (holder is PostMediaAdapter.VideoViewHolder) holder.pause()
                         }
                     }
                 }
             }
-            binding.viewPagerMedia.registerOnPageChangeCallback(pageChangeCallback!!)
+            pageChangeCallback = callback
+            binding.viewPagerMedia.registerOnPageChangeCallback(callback)
+            isCallbackRegistered = true
 
             if (post.mediaUrls.size > 1) {
                 binding.dotsIndicator.visibility = View.VISIBLE
@@ -224,7 +251,6 @@ class PostAdapter(
             }
 
             // like button state — use ImageButton now
-            val isLiked = likedPosts.contains(post.postId)
             binding.btnLike.setImageResource(
                 if (isLiked) R.drawable.ic_heart_filled else R.drawable.ic_heart_outline
             )
@@ -257,3 +283,19 @@ class PostAdapter(
 }
 
 class HeaderViewHolder(view: View) : RecyclerView.ViewHolder(view)
+
+class PostDiffCallback(
+    private val oldList: List<Post>,
+    private val newList: List<Post>
+) : DiffUtil.Callback() {
+    override fun getOldListSize() = oldList.size
+    override fun getNewListSize() = newList.size
+
+    override fun areItemsTheSame(old: Int, new: Int): Boolean {
+        return oldList[old].postId == newList[new].postId
+    }
+
+    override fun areContentsTheSame(old: Int, new: Int): Boolean {
+        return oldList[old] == newList[new]
+    }
+}

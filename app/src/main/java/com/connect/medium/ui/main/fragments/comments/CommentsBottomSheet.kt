@@ -1,37 +1,28 @@
 package com.connect.medium.ui.main.fragments.comments
 
 import android.os.Bundle
-import androidx.fragment.app.Fragment
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
-import androidx.fragment.app.viewModels
+import androidx.fragment.app.activityViewModels
 import androidx.recyclerview.widget.LinearLayoutManager
-import com.connect.medium.R
 import com.connect.medium.databinding.FragmentCommentsBottomSheetBinding
 import com.connect.medium.ui.main.adapters.CommentAdapter
+import com.connect.medium.ui.main.fragments.home.HomeViewModel
+import com.connect.medium.ui.main.fragments.home.HomeViewModelFactory
 import com.connect.medium.utils.Resource
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 
-// TODO: Rename parameter arguments, choose names that match
-// the fragment initialization parameters, e.g. ARG_ITEM_NUMBER
-private const val ARG_PARAM1 = "param1"
-private const val ARG_PARAM2 = "param2"
-
-/**
- * A simple [Fragment] subclass.
- * Use the [CommentsBottomSheet.newInstance] factory method to
- * create an instance of this fragment.
- */
 class CommentsBottomSheet : BottomSheetDialogFragment() {
 
     private var _binding: FragmentCommentsBottomSheetBinding? = null
     private val binding get() = _binding!!
 
-    private val viewModel: CommentsViewModel by viewModels {
-        CommentsViewModelFactory(requireActivity().application)
+    // Shared with HomeFragment — same instance via activityViewModels
+    private val viewModel: HomeViewModel by activityViewModels {
+        HomeViewModelFactory(requireActivity().application)
     }
 
     private lateinit var commentAdapter: CommentAdapter
@@ -74,7 +65,7 @@ class CommentsBottomSheet : BottomSheetDialogFragment() {
         viewModel.loadComments(postId)
     }
 
-    // make bottom sheet taller — 90% of screen height
+    // Make bottom sheet taller — 90% of screen height
     override fun onStart() {
         super.onStart()
         dialog?.let {
@@ -88,6 +79,12 @@ class CommentsBottomSheet : BottomSheetDialogFragment() {
                 behavior.state = BottomSheetBehavior.STATE_EXPANDED
             }
         }
+    }
+
+    override fun onDestroyView() {
+        viewModel.stopObservingComments()
+        super.onDestroyView()
+        _binding = null
     }
 
     private fun setupRecyclerView() {
@@ -135,10 +132,5 @@ class CommentsBottomSheet : BottomSheetDialogFragment() {
                 }
             }
         }
-    }
-
-    override fun onDestroyView() {
-        super.onDestroyView()
-        _binding = null
     }
 }

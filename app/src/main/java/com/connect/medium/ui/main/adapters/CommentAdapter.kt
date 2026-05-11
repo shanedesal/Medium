@@ -3,6 +3,7 @@ package com.connect.medium.ui.main.adapters
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.ViewGroup
+import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
 import com.connect.medium.R
@@ -14,8 +15,9 @@ class CommentAdapter : RecyclerView.Adapter<CommentAdapter.CommentViewHolder>() 
     private var comments = listOf<Comment>()
 
     fun submitList(newComments: List<Comment>) {
+        val diff = DiffUtil.calculateDiff(CommentDiffCallback(comments, newComments))
         comments = newComments
-        notifyDataSetChanged()
+        diff.dispatchUpdatesTo(this)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CommentViewHolder {
@@ -63,4 +65,14 @@ class CommentAdapter : RecyclerView.Adapter<CommentAdapter.CommentViewHolder>() 
             }
         }
     }
+}
+
+class CommentDiffCallback(
+    private val old: List<Comment>,
+    private val new: List<Comment>
+) : DiffUtil.Callback() {
+    override fun getOldListSize() = old.size
+    override fun getNewListSize() = new.size
+    override fun areItemsTheSame(o: Int, n: Int) = old[o].commentId == new[n].commentId
+    override fun areContentsTheSame(o: Int, n: Int) = old[o] == new[n]
 }

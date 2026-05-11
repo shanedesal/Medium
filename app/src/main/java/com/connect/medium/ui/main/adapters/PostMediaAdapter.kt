@@ -18,7 +18,7 @@ import com.connect.medium.databinding.ItemPostImageBinding
 
 @UnstableApi
 class PostMediaAdapter(
-    private val mediaUrls: List<String>,
+    val mediaUrls: List<String>,
     private val mediaTypes: List<String>
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
