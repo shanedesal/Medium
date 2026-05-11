@@ -1,6 +1,7 @@
 package com.connect.medium.ui.main.fragments.home
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
@@ -29,6 +30,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val authRepository = AuthRepository()
     private val userRepository = UserRepository(firestoreDataSource, db.userDao(), db.followDao())
     private val _currentUser = MutableLiveData<User?>()
+
+    companion object {
+        private const val TAG_FEED = "FeedPagination"
+    }
 
     val currentUid = authRepository.getCurrentUser()?.uid
         ?: throw IllegalStateException("HomeViewModel requires a logged in user")
@@ -72,6 +77,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         feedJob?.cancel()
         feedJob = viewModelScope.launch {
             _postsState.value = Resource.Loading
+            Log.d(TAG_FEED, "🔄 loadFeed() started — subscribing to Firestore")
             delay(800)
             postRepository.observeFeedPosts()
                 .collect { posts ->
@@ -87,6 +93,21 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     if (deltasChanged) {
                         _commentCountDeltas.postValue(buildDeltaMap(posts))
                     }
+
+                    Log.d(
+                        TAG_FEED,
+                        "📰 ViewModel dispatching ${posts.size} posts to UI"
+                    )
+                    posts.forEachIndexed { index, post ->
+                        Log.d(
+                            TAG_FEED,
+                            "  [$index] @${post.authorUsername} | " +
+                            "postId=${post.postId} | " +
+                            "likes=${post.likeCount} comments=${post.commentCount} | " +
+                            "caption=\"${post.caption.take(50)}\""
+                        )
+                    }
+
                     _postsState.postValue(Resource.Success(posts))
                 }
         }

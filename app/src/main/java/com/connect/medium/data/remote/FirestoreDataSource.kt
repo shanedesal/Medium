@@ -1,5 +1,6 @@
 package com.connect.medium.data.remote
 
+import android.util.Log
 import com.connect.medium.data.model.*
 import com.connect.medium.utils.Constants
 import com.google.firebase.firestore.FieldValue
@@ -13,6 +14,10 @@ import kotlinx.coroutines.tasks.await
 class FirestoreDataSource {
 
     private val firestore = FirebaseFirestore.getInstance()
+
+    companion object {
+        private const val TAG_FEED = "FeedPagination"
+    }
 
     // ─── User ───────────────────────────────────────────
 
@@ -122,13 +127,40 @@ class FirestoreDataSource {
             .limit(50)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
+                    Log.e(TAG_FEED, "🔴 Firestore snapshot error: ${error.message}")
                     trySend(emptyList())
                     return@addSnapshotListener
                 }
+
+                val docs = snapshot?.documents ?: emptyList()
+                val fromCache = snapshot?.metadata?.isFromCache == true
+                val hasPendingWrites = snapshot?.metadata?.hasPendingWrites() == true
+                Log.d(
+                    TAG_FEED,
+                    "📥 Firestore snapshot received | count=${docs.size} " +
+                    "fromCache=$fromCache hasPendingWrites=$hasPendingWrites"
+                )
+
+                // Log document-level changes for easy diff tracking
+                snapshot?.documentChanges?.forEach { change ->
+                    val postId = change.document.id
+                    val caption = change.document.getString("caption")?.take(40) ?: ""
+                    val createdAt = change.document.getLong("createdAt") ?: 0L
+                    Log.d(
+                        TAG_FEED,
+                        "  ├─ [${change.type.name}] postId=$postId " +
+                        "newIndex=${change.newIndex} oldIndex=${change.oldIndex} " +
+                        "createdAt=$createdAt caption=\"$caption\""
+                    )
+                }
+
                 val posts = snapshot?.toObjects(Post::class.java) ?: emptyList()
                 trySend(posts)
             }
-        awaitClose { listener.remove() }
+        awaitClose {
+            Log.d(TAG_FEED, "🔌 observeFeedPosts listener removed")
+            listener.remove()
+        }
     }
 
     fun observeUserPosts(uid: String): Flow<List<Post>> = callbackFlow {

@@ -1,5 +1,6 @@
 package com.connect.medium.data.repository
 
+import android.util.Log
 import com.connect.medium.data.local.dao.PostDao
 import com.connect.medium.data.model.Comment
 import com.connect.medium.data.model.Notification
@@ -20,9 +21,26 @@ class PostRepository(
     private val postDao: PostDao
 ) {
 
+    companion object {
+        private const val TAG_FEED = "FeedPagination"
+    }
+
     fun observeFeedPosts(): Flow<List<Post>> {
         return firestoreDataSource.observeFeedPosts()
             .onEach { posts ->
+                Log.d(
+                    TAG_FEED,
+                    "🗃️ Repository caching ${posts.size} posts to Room"
+                )
+                posts.forEachIndexed { index, post ->
+                    Log.v(
+                        TAG_FEED,
+                        "  [$index] postId=${post.postId} " +
+                        "likes=${post.likeCount} comments=${post.commentCount} " +
+                        "author=@${post.authorUsername} " +
+                        "caption=\"${post.caption.take(40)}\""
+                    )
+                }
                 // cache to Room
                 postDao.insertPosts(posts.map { it.toEntity() })
             }
