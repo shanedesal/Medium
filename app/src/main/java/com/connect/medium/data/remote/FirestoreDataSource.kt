@@ -3,6 +3,7 @@ package com.connect.medium.data.remote
 import android.util.Log
 import com.connect.medium.data.model.*
 import com.connect.medium.utils.Constants
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
@@ -121,14 +122,17 @@ class FirestoreDataSource {
             .await()
     }
 
-    fun observeFeedPosts(): Flow<List<Post>> = callbackFlow {
+    // ─── Real-time first page (live updates) ──────────────
+    // Emits Pair<posts, lastDocumentSnapshot?> so the ViewModel
+    // can use the last document as a cursor for loadMorePosts().
+    fun observeFirstPagePosts(): Flow<Pair<List<Post>, DocumentSnapshot?>> = callbackFlow {
         val listener = firestore.collection(Constants.COLLECTION_POSTS)
             .orderBy("createdAt", Query.Direction.DESCENDING)
-            .limit(50)
+            .limit(Constants.PAGE_SIZE)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    Log.e(TAG_FEED, "🔴 Firestore snapshot error: ${error.message}")
-                    trySend(emptyList())
+                    Log.e(TAG_FEED, "🔴 First-page snapshot error: ${error.message}")
+                    trySend(Pair(emptyList(), null))
                     return@addSnapshotListener
                 }
 
@@ -137,30 +141,57 @@ class FirestoreDataSource {
                 val hasPendingWrites = snapshot?.metadata?.hasPendingWrites() == true
                 Log.d(
                     TAG_FEED,
-                    "📥 Firestore snapshot received | count=${docs.size} " +
+                    "📥 First-page snapshot | count=${docs.size} " +
                     "fromCache=$fromCache hasPendingWrites=$hasPendingWrites"
                 )
 
-                // Log document-level changes for easy diff tracking
                 snapshot?.documentChanges?.forEach { change ->
                     val postId = change.document.id
                     val caption = change.document.getString("caption")?.take(40) ?: ""
-                    val createdAt = change.document.getLong("createdAt") ?: 0L
                     Log.d(
                         TAG_FEED,
                         "  ├─ [${change.type.name}] postId=$postId " +
-                        "newIndex=${change.newIndex} oldIndex=${change.oldIndex} " +
-                        "createdAt=$createdAt caption=\"$caption\""
+                        "newIndex=${change.newIndex} caption=\"$caption\""
                     )
                 }
 
                 val posts = snapshot?.toObjects(Post::class.java) ?: emptyList()
-                trySend(posts)
+                val lastDoc = docs.lastOrNull()
+                trySend(Pair(posts, lastDoc))
             }
         awaitClose {
-            Log.d(TAG_FEED, "🔌 observeFeedPosts listener removed")
+            Log.d(TAG_FEED, "🔌 observeFirstPagePosts listener removed")
             listener.remove()
         }
+    }
+
+    // ─── One-shot load-more (cursor pagination) ────────────
+    // Fetches the next PAGE_SIZE posts starting after `afterDoc`.
+    // Returns Pair<posts, lastDocumentSnapshot?> — null lastDoc means no more pages.
+    suspend fun loadMorePosts(afterDoc: DocumentSnapshot): Pair<List<Post>, DocumentSnapshot?> {
+        val snapshot = firestore.collection(Constants.COLLECTION_POSTS)
+            .orderBy("createdAt", Query.Direction.DESCENDING)
+            .startAfter(afterDoc)
+            .limit(Constants.PAGE_SIZE)
+            .get()
+            .await()
+
+        val posts = snapshot.toObjects(Post::class.java)
+        val lastDoc = snapshot.documents.lastOrNull()
+        Log.d(
+            TAG_FEED,
+            "📄 loadMorePosts | fetched=${posts.size} " +
+            "isLastPage=${posts.size < Constants.PAGE_SIZE} " +
+            "newCursor=${lastDoc?.id}"
+        )
+        posts.forEachIndexed { i, post ->
+            Log.d(
+                TAG_FEED,
+                "  [$i] postId=${post.postId} author=@${post.authorUsername} " +
+                "caption=\"${post.caption.take(40)}\""
+            )
+        }
+        return Pair(posts, lastDoc)
     }
 
     fun observeUserPosts(uid: String): Flow<List<Post>> = callbackFlow {

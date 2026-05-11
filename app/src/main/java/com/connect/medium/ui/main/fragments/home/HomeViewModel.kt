@@ -14,7 +14,9 @@ import com.connect.medium.data.remote.FirestoreDataSource
 import com.connect.medium.data.repository.AuthRepository
 import com.connect.medium.data.repository.PostRepository
 import com.connect.medium.data.repository.UserRepository
+import com.connect.medium.utils.Constants
 import com.connect.medium.utils.Resource
+import com.google.firebase.firestore.DocumentSnapshot
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -41,6 +43,18 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     // ─── Feed ────────────────────────────────────────────
     private val _postsState = MutableLiveData<Resource<List<Post>>>()
     val postsState: LiveData<Resource<List<Post>>> = _postsState
+
+    // ─── Pagination state ────────────────────────────────
+    /** Last document of the current live first page — used as cursor for page 2 */
+    private var firstPageCursor: DocumentSnapshot? = null
+    /** Accumulated posts from page 2 onwards (not real-time) */
+    private val _paginatedPosts = mutableListOf<Post>()
+    /** Cursor pointing to the last document of the latest loaded page */
+    private var lastPageCursor: DocumentSnapshot? = null
+    private var isLastPage = false
+
+    private val _isLoadingMore = MutableLiveData<Boolean>(false)
+    val isLoadingMore: LiveData<Boolean> = _isLoadingMore
 
     // ─── Likes ───────────────────────────────────────────
     private val _likeState = MutableLiveData<Resource<Unit>>()
@@ -74,42 +88,101 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     // ─── Feed ────────────────────────────────────────────
 
     fun loadFeed() {
+        // Cancel existing listener and reset all pagination state
         feedJob?.cancel()
+        _paginatedPosts.clear()
+        firstPageCursor = null
+        lastPageCursor = null
+        isLastPage = false
+        _isLoadingMore.value = false
+
         feedJob = viewModelScope.launch {
             _postsState.value = Resource.Loading
-            Log.d(TAG_FEED, "🔄 loadFeed() started — subscribing to Firestore")
+            Log.d(TAG_FEED, "🔄 loadFeed() — resetting pagination, subscribing to first page")
             delay(800)
-            postRepository.observeFeedPosts()
-                .collect { posts ->
-                    // Clear deltas for posts where Firestore has confirmed the updated count
+            postRepository.observeFirstPagePosts()
+                .collect { (livePosts, cursor) ->
+                    // Store the cursor from the live page for load-more
+                    firstPageCursor = cursor
+                    // If we haven’t fetched any older pages yet, lastPageCursor == firstPageCursor
+                    if (lastPageCursor == null) lastPageCursor = cursor
+
+                    // Merge live first page with accumulated older pages.
+                    // Deduplicate by postId — live page always wins for recency.
+                    val mergedIds = livePosts.map { it.postId }.toSet()
+                    val dedupedOlder = _paginatedPosts.filter { it.postId !in mergedIds }
+                    val merged = livePosts + dedupedOlder
+
+                    // Propagate comment-count delta clearing
                     var deltasChanged = false
-                    posts.forEach { post ->
+                    merged.forEach { post ->
                         val expected = expectedCommentCounts[post.postId]
                         if (expected != null && post.commentCount >= expected) {
                             expectedCommentCounts.remove(post.postId)
                             deltasChanged = true
                         }
                     }
-                    if (deltasChanged) {
-                        _commentCountDeltas.postValue(buildDeltaMap(posts))
-                    }
+                    if (deltasChanged) _commentCountDeltas.postValue(buildDeltaMap(merged))
 
                     Log.d(
                         TAG_FEED,
-                        "📰 ViewModel dispatching ${posts.size} posts to UI"
+                        "📰 ViewModel dispatching ${merged.size} posts " +
+                        "(live=${livePosts.size} + older=${dedupedOlder.size})"
                     )
-                    posts.forEachIndexed { index, post ->
-                        Log.d(
-                            TAG_FEED,
-                            "  [$index] @${post.authorUsername} | " +
-                            "postId=${post.postId} | " +
-                            "likes=${post.likeCount} comments=${post.commentCount} | " +
-                            "caption=\"${post.caption.take(50)}\""
-                        )
-                    }
-
-                    _postsState.postValue(Resource.Success(posts))
+                    _postsState.postValue(Resource.Success(merged))
                 }
+        }
+    }
+
+    /**
+     * Fetches the next page of posts using the cursor from the last loaded page.
+     * Safe to call multiple times — guards against concurrent fetches and last-page.
+     */
+    fun loadMorePosts() {
+        if (_isLoadingMore.value == true || isLastPage) {
+            Log.d(TAG_FEED, "⏭️ loadMorePosts skipped: isLoadingMore=${_isLoadingMore.value} isLastPage=$isLastPage")
+            return
+        }
+        val cursor = lastPageCursor ?: run {
+            Log.d(TAG_FEED, "⏭️ loadMorePosts skipped: cursor not ready yet")
+            return
+        }
+
+        viewModelScope.launch {
+            _isLoadingMore.postValue(true)
+            Log.d(TAG_FEED, "⬇️ loadMorePosts() — fetching next page after cursor=${cursor.id}")
+
+            when (val result = postRepository.loadMorePosts(cursor)) {
+                is Resource.Success -> {
+                    val (newPosts, newCursor) = result.data
+                    if (newPosts.size < Constants.PAGE_SIZE) {
+                        isLastPage = true
+                        Log.d(TAG_FEED, "✅ Reached last page (fetched=${newPosts.size} < PAGE_SIZE=${Constants.PAGE_SIZE})")
+                    }
+                    _paginatedPosts.addAll(newPosts)
+                    lastPageCursor = newCursor ?: cursor  // keep old cursor if no new one
+
+                    // Re-merge with the current live first page
+                    val livePosts = (postsState.value as? Resource.Success)?.data
+                        ?.take(Constants.PAGE_SIZE.toInt()) ?: emptyList()
+                    val mergedIds = livePosts.map { it.postId }.toSet()
+                    val dedupedOlder = _paginatedPosts.filter { it.postId !in mergedIds }
+                    val merged = livePosts + dedupedOlder
+
+                    Log.d(
+                        TAG_FEED,
+                        "📊 After load-more: total=${merged.size} " +
+                        "(live=${livePosts.size} older=${dedupedOlder.size})"
+                    )
+                    _postsState.postValue(Resource.Success(merged))
+                }
+                is Resource.Error -> {
+                    Log.e(TAG_FEED, "🔴 loadMorePosts error: ${result.message}")
+                    // Don’t update postsState — keep showing existing list
+                }
+                else -> Unit
+            }
+            _isLoadingMore.postValue(false)
         }
     }
 
@@ -156,6 +229,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     _postsState.postValue(Resource.Success(updatedPosts))
                 }
 
+                // Also patch _paginatedPosts in-place so when the Firestore snapshot
+                // fires (triggered by the like write itself) and the collect block
+                // re-merges livePosts + _paginatedPosts, the updated count survives.
+                val paginatedIndex = _paginatedPosts.indexOfFirst { it.postId == post.postId }
+                if (paginatedIndex != -1) {
+                    val p = _paginatedPosts[paginatedIndex]
+                    val newCount = if (isLiked) maxOf(0, p.likeCount - 1) else p.likeCount + 1
+                    _paginatedPosts[paginatedIndex] = p.copy(likeCount = newCount)
+                }
+
                 val currentUser = _currentUser.value
                 val result = if (isLiked) {
                     postRepository.unlikePost(post.postId, currentUid)
@@ -182,6 +265,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                             } else p
                         }
                         _postsState.postValue(Resource.Success(revertedPosts))
+                    }
+
+                    // Mirror rollback into _paginatedPosts too
+                    if (paginatedIndex != -1) {
+                        val p = _paginatedPosts[paginatedIndex]
+                        val revertedCount = if (isLiked) p.likeCount + 1 else maxOf(0, p.likeCount - 1)
+                        _paginatedPosts[paginatedIndex] = p.copy(likeCount = revertedCount)
                     }
 
                     _likeState.postValue(result)

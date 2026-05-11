@@ -11,6 +11,7 @@ import com.connect.medium.data.remote.FirestoreDataSource
 import com.connect.medium.utils.Resource
 import com.connect.medium.utils.toEntity
 import com.connect.medium.utils.toModel
+import com.google.firebase.firestore.DocumentSnapshot
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
@@ -25,13 +26,12 @@ class PostRepository(
         private const val TAG_FEED = "FeedPagination"
     }
 
-    fun observeFeedPosts(): Flow<List<Post>> {
-        return firestoreDataSource.observeFeedPosts()
-            .onEach { posts ->
-                Log.d(
-                    TAG_FEED,
-                    "🗃️ Repository caching ${posts.size} posts to Room"
-                )
+    // Real-time listener for the first PAGE_SIZE posts.
+    // Emits Pair<posts, lastDocumentSnapshot?> — the cursor for loadMorePosts().
+    fun observeFirstPagePosts(): Flow<Pair<List<Post>, DocumentSnapshot?>> {
+        return firestoreDataSource.observeFirstPagePosts()
+            .onEach { (posts, _) ->
+                Log.d(TAG_FEED, "🗃️ Repository caching ${posts.size} first-page posts to Room")
                 posts.forEachIndexed { index, post ->
                     Log.v(
                         TAG_FEED,
@@ -41,9 +41,20 @@ class PostRepository(
                         "caption=\"${post.caption.take(40)}\""
                     )
                 }
-                // cache to Room
                 postDao.insertPosts(posts.map { it.toEntity() })
             }
+    }
+
+    // One-shot cursor fetch for subsequent pages.
+    suspend fun loadMorePosts(afterDoc: DocumentSnapshot): Resource<Pair<List<Post>, DocumentSnapshot?>> {
+        return try {
+            val result = firestoreDataSource.loadMorePosts(afterDoc)
+            // Cache the new page into Room as well
+            postDao.insertPosts(result.first.map { it.toEntity() })
+            Resource.Success(result)
+        } catch (e: Exception) {
+            Resource.Error(e.message ?: "Failed to load more posts")
+        }
     }
 
     fun getCachedPosts(): Flow<List<Post>> {

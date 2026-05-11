@@ -25,6 +25,7 @@ class PostAdapter(
     private var posts = listOf<Post>()
     private var likedPosts = mutableSetOf<String>()
     private var commentCountDeltas = mapOf<String, Int>()
+    private var isLoadingMore = false
 
 
     init {
@@ -58,36 +59,61 @@ class PostAdapter(
         notifyDataSetChanged()
     }
 
+    fun setLoadingMore(loading: Boolean) {
+        if (isLoadingMore == loading) return
+        isLoadingMore = loading
+        if (loading) {
+            // Insert footer at the end
+            notifyItemInserted(itemCount - 1)
+        } else {
+            // Remove footer
+            notifyItemRemoved(itemCount)
+        }
+    }
+
 
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
-        return if (viewType == VIEW_TYPE_HEADER) {
-            val view = LayoutInflater.from(parent.context)
-                .inflate(R.layout.item_feed_header, parent, false)
-            HeaderViewHolder(view)
-        } else {
-            val binding = ItemPostBinding.inflate(
-                LayoutInflater.from(parent.context), parent, false
-            )
-            PostViewHolder(binding)
+        return when (viewType) {
+            VIEW_TYPE_HEADER -> {
+                val view = LayoutInflater.from(parent.context)
+                    .inflate(R.layout.item_feed_header, parent, false)
+                HeaderViewHolder(view)
+            }
+            VIEW_TYPE_LOADING -> {
+                val view = LayoutInflater.from(parent.context)
+                    .inflate(R.layout.item_loading_footer, parent, false)
+                LoadingViewHolder(view)
+            }
+            else -> {
+                val binding = ItemPostBinding.inflate(
+                    LayoutInflater.from(parent.context), parent, false
+                )
+                PostViewHolder(binding)
+            }
         }
     }
 
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
         when (holder) {
             is PostViewHolder -> {
-                val post = posts[position - 1]
+                val post = posts[position - 1] // -1 for header
                 holder.bind(post, likedPosts)
             }
             is HeaderViewHolder -> {}
+            is LoadingViewHolder -> {}
         }
     }
 
     override fun getItemViewType(position: Int): Int {
-        return if (position == 0) VIEW_TYPE_HEADER else VIEW_TYPE_POST
+        return when {
+            position == 0 -> VIEW_TYPE_HEADER
+            position == posts.size + 1 && isLoadingMore -> VIEW_TYPE_LOADING
+            else -> VIEW_TYPE_POST
+        }
     }
 
-    override fun getItemCount() = posts.size + 1
+    override fun getItemCount() = posts.size + 1 + if (isLoadingMore) 1 else 0
 
     // release all players when post is recycled
     override fun onViewRecycled(holder: RecyclerView.ViewHolder) {
@@ -275,10 +301,12 @@ class PostAdapter(
     companion object {
         private const val VIEW_TYPE_HEADER = 0
         private const val VIEW_TYPE_POST = 1
+        private const val VIEW_TYPE_LOADING = 2
     }
 }
 
 class HeaderViewHolder(view: View) : RecyclerView.ViewHolder(view)
+class LoadingViewHolder(view: View) : RecyclerView.ViewHolder(view)
 
 class PostDiffCallback(
     private val oldList: List<Post>,

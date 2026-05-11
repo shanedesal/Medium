@@ -11,5 +11,7 @@ object Constants {
     const val COLLECTION_FOLLOWERS = "followers"
     const val COLLECTION_FOLLOWING = "following"
 
+    // Feed Pagination
+    const val PAGE_SIZE = 10L
 
 }

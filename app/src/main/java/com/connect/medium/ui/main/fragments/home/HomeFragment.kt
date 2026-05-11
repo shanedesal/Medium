@@ -11,6 +11,7 @@ import androidx.fragment.app.viewModels
 import androidx.media3.common.util.UnstableApi
 import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.connect.medium.R
 import com.connect.medium.databinding.FragmentHomeBinding
 import com.connect.medium.ui.main.adapters.PostAdapter
@@ -87,6 +88,18 @@ class HomeFragment : Fragment() {
         binding.rvFeed.apply {
             layoutManager = LinearLayoutManager(requireContext())
             adapter = postAdapter
+            addOnScrollListener(object : RecyclerView.OnScrollListener() {
+                override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+                    if (dy <= 0) return  // only trigger on downward scroll
+                    val lm = recyclerView.layoutManager as LinearLayoutManager
+                    val lastVisible = lm.findLastVisibleItemPosition()
+                    val total = lm.itemCount
+                    // Trigger load-more when 3 items from the end are visible
+                    if (lastVisible >= total - 3) {
+                        viewModel.loadMorePosts()
+                    }
+                }
+            })
         }
     }
 
@@ -138,6 +151,9 @@ class HomeFragment : Fragment() {
             if (resource is Resource.Error) {
                 Toast.makeText(requireContext(), resource.message, Toast.LENGTH_SHORT).show()
             }
+        }
+        viewModel.isLoadingMore.observe(viewLifecycleOwner) { loading ->
+            postAdapter.setLoadingMore(loading)
         }
     }
 
