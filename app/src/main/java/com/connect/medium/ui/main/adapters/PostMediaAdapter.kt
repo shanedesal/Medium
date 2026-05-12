@@ -3,17 +3,23 @@ package com.connect.medium.ui.main.adapters
 import android.app.Activity
 import android.content.Context
 import android.view.LayoutInflater
+import android.view.View
 import android.view.ViewGroup
-import androidx.fragment.app.Fragment
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
 import com.connect.medium.R
-import com.connect.medium.databinding.ItemPostVideoBinding
 import com.connect.medium.databinding.ItemPostImageBinding
+import com.connect.medium.databinding.ItemPostVideoBinding
+import com.connect.medium.utils.VideoCache
+import com.connect.medium.utils.toCloudinaryStreamingUrl
 
 
 @UnstableApi
@@ -111,10 +117,17 @@ class PostMediaAdapter(
     ) : RecyclerView.ViewHolder(binding.root) {
 
         private var player: ExoPlayer? = null
+        private var playerListener: Player.Listener? = null
         private var isMuted = false
 
         private fun createPlayer(context: Context): ExoPlayer {
-            return ExoPlayer.Builder(context.applicationContext) // Always use application context for ExoPlayer
+            val cacheDataSourceFactory = CacheDataSource.Factory()
+                .setCache(VideoCache.get(context))
+                .setUpstreamDataSourceFactory(DefaultHttpDataSource.Factory())
+                .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+
+            return ExoPlayer.Builder(context.applicationContext)
+                .setMediaSourceFactory(DefaultMediaSourceFactory(cacheDataSourceFactory))
                 .setLoadControl(
                     DefaultLoadControl.Builder()
                         .setBufferDurationsMs(
@@ -139,12 +152,31 @@ class PostMediaAdapter(
 
             // Use application context for ExoPlayer to avoid leaks
             player = createPlayer(binding.root.context).apply {
-                setMediaItem(MediaItem.fromUri(url))
+                setMediaItem(MediaItem.fromUri(url.toCloudinaryStreamingUrl()))
                 repeatMode = ExoPlayer.REPEAT_MODE_OFF
                 volume = 1f
                 prepare()
                 playWhenReady = false
             }
+
+            playerListener = object : Player.Listener {
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    when (playbackState) {
+                        Player.STATE_BUFFERING -> {
+                            if (player?.playWhenReady == true) {
+                                binding.progressBuffering.visibility = View.VISIBLE
+                            }
+                        }
+                        Player.STATE_READY -> binding.progressBuffering.visibility = View.GONE
+                        Player.STATE_ENDED -> {
+                            binding.progressBuffering.visibility = View.GONE
+                            binding.btnPlayPause.setImageResource(R.drawable.ic_play)
+                        }
+                        else -> binding.progressBuffering.visibility = View.GONE
+                    }
+                }
+            }
+            player?.addListener(playerListener!!)
 
             binding.playerView.player = player
 
@@ -156,9 +188,18 @@ class PostMediaAdapter(
                 player?.let { p ->
                     if (p.isPlaying) {
                         p.pause()
+                        binding.progressBuffering.visibility = View.GONE
                         binding.btnPlayPause.setImageResource(R.drawable.ic_play)
                     } else {
+                        if (p.playbackState == Player.STATE_ENDED) {
+                            p.seekTo(0)
+                        }
                         p.play()
+                        // If already buffering when play is pressed, the listener won't
+                        // fire again (state didn't change), so show the spinner here.
+                        if (p.playbackState == Player.STATE_BUFFERING) {
+                            binding.progressBuffering.visibility = View.VISIBLE
+                        }
                         binding.btnPlayPause.setImageResource(R.drawable.ic_pause)
                     }
                 }
@@ -177,18 +218,19 @@ class PostMediaAdapter(
 
         fun pause() {
             player?.pause()
+            binding.progressBuffering.visibility = View.GONE
             binding.btnPlayPause.setImageResource(R.drawable.ic_play)
         }
 
         fun release() {
-            // Remove listeners to prevent memory leaks
             binding.btnPlayPause.setOnClickListener(null)
             binding.btnMute.setOnClickListener(null)
-
+            binding.progressBuffering.visibility = View.GONE
             binding.playerView.player = null
 
             player?.let { p ->
                 try {
+                    playerListener?.let { p.removeListener(it) }
                     p.stop()
                     p.clearMediaItems()
                     p.release()
@@ -196,6 +238,7 @@ class PostMediaAdapter(
                     e.printStackTrace()
                 }
             }
+            playerListener = null
             player = null
         }
     }

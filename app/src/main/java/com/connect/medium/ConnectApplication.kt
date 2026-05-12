@@ -2,12 +2,14 @@ package com.connect.medium
 
 import android.app.Application
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import com.bumptech.glide.Glide
 import com.bumptech.glide.GlideBuilder
 import com.bumptech.glide.MemoryCategory
 import com.bumptech.glide.load.engine.cache.LruResourceCache
 import com.connect.medium.utils.ThemePreferences
+import com.connect.medium.utils.VideoCache
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -46,5 +48,11 @@ class ConnectApplication : Application() {
         Glide.get(this).apply{
             setMemoryCategory(MemoryCategory.LOW)
         }
+    }
+
+    @UnstableApi
+    override fun onLowMemory() {
+        super.onLowMemory()
+        VideoCache.release()
     }
 }

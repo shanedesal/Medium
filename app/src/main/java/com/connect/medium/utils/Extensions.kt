@@ -42,6 +42,14 @@ fun PostEntity.toModel(): Post = Post(
     createdAt = createdAt
 )
 
+// Returns the URL unchanged. fl_faststart is an ffmpeg encoder flag, not a Cloudinary
+// transformation parameter, and q_auto on video triggers on-the-fly re-encoding which
+// has a 40 MB free-plan limit and burns monthly credits. ExoPlayer already handles
+// progressive/chunked delivery natively via HTTP range requests (206 Partial Content)
+// combined with the CacheDataSource + SimpleCache layer in PostMediaAdapter.
+fun String.toCloudinaryStreamingUrl(): String = this
+
+
 // Notification
 fun Notification.toEntity(): NotificationEntity = NotificationEntity(
     notificationId, toUid, fromUid, fromUsername,
