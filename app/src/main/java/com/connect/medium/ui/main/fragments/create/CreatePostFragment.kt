@@ -1,16 +1,11 @@
 package com.connect.medium.ui.main.fragments.create
 
-import android.Manifest
-import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
 import androidx.core.os.BundleCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.setFragmentResultListener
@@ -21,15 +16,11 @@ import com.connect.medium.R
 import com.connect.medium.databinding.FragmentCreatePostBinding
 import com.connect.medium.ui.main.adapters.MediaPreviewAdapter
 import com.connect.medium.utils.Resource
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import java.io.File
 
 class CreatePostFragment : Fragment() {
 
     companion object {
         private const val VIDEO_SIZE_LIMIT_BYTES = 50 * 1024 * 1024L
-        private const val KEY_CAMERA_IMAGE_URI = "key_camera_image_uri"
-        private const val KEY_CAMERA_VIDEO_URI = "key_camera_video_uri"
         private const val KEY_SELECTED_URIS = "key_selected_uris"
         private const val KEY_SELECTED_TYPES = "key_selected_types"
         private const val KEY_TOOLBAR_EXPANDED = "key_toolbar_expanded"
@@ -46,51 +37,6 @@ class CreatePostFragment : Fragment() {
     private lateinit var mediaPreviewAdapter: MediaPreviewAdapter
 
     private var isToolbarExpanded = false
-    private var cameraImageUri: Uri? = null
-    private var cameraVideoUri: Uri? = null
-
-    private val takePictureLauncher = registerForActivityResult(
-        ActivityResultContracts.TakePicture()
-    ) { success ->
-        if (success) {
-            cameraImageUri?.let { uri ->
-                selectedMedia.add(Pair(uri, "image"))
-                mediaPreviewAdapter.submitList(selectedMedia.toList())
-                updateMediaCount()
-            }
-        }
-    }
-
-    private val takeVideoLauncher = registerForActivityResult(
-        ActivityResultContracts.CaptureVideo()
-    ) { success ->
-        if (!success) return@registerForActivityResult
-        cameraVideoUri?.let { uri ->
-            val fileSize = requireContext().contentResolver
-                .openFileDescriptor(uri, "r")?.statSize ?: 0
-            if (fileSize > VIDEO_SIZE_LIMIT_BYTES) {
-                Toast.makeText(
-                    requireContext(),
-                    "Video exceeds 50MB limit: ${fileSize / (1024 * 1024)}MB",
-                    Toast.LENGTH_SHORT
-                ).show()
-                return@registerForActivityResult
-            }
-            selectedMedia.add(Pair(uri, "video"))
-            mediaPreviewAdapter.submitList(selectedMedia.toList())
-            updateMediaCount()
-        }
-    }
-
-    private val cameraPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        if (permissions[Manifest.permission.CAMERA] == true) {
-            showCameraOptions()
-        } else {
-            Toast.makeText(requireContext(), "Camera permission is required", Toast.LENGTH_SHORT).show()
-        }
-    }
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -103,14 +49,11 @@ class CreatePostFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        if (savedInstanceState != null) {
-            cameraImageUri = BundleCompat.getParcelable(savedInstanceState, KEY_CAMERA_IMAGE_URI, Uri::class.java)
-            cameraVideoUri = BundleCompat.getParcelable(savedInstanceState, KEY_CAMERA_VIDEO_URI, Uri::class.java)
-        }
         setupMediaPreview()
         setupClickListeners()
         observeViewModel()
         listenForPickerResult()
+        listenForCameraResult()
         if (savedInstanceState != null) restoreState(savedInstanceState)
     }
 
@@ -141,7 +84,7 @@ class CreatePostFragment : Fragment() {
         }
 
         binding.btnCamera.setOnClickListener {
-            checkCameraPermissionAndOpen()
+            findNavController().navigate(R.id.action_createPost_to_camera)
         }
 
         binding.btnExpand.setOnClickListener {
@@ -193,77 +136,19 @@ class CreatePostFragment : Fragment() {
         }
     }
 
-    // ─────────────────────────── Camera ───────────────────────────
+    // ─────────────────────────── Camera result ───────────────────────────
 
-    private fun checkCameraPermissionAndOpen() {
-        when {
-            ContextCompat.checkSelfPermission(
-                requireContext(), Manifest.permission.CAMERA
-            ) == PackageManager.PERMISSION_GRANTED -> showCameraOptions()
+    private fun listenForCameraResult() {
+        setFragmentResultListener(CameraFragment.RESULT_KEY) { _, bundle ->
+            val uri = BundleCompat.getParcelable(bundle, CameraFragment.ARG_URI, Uri::class.java)
+                ?: return@setFragmentResultListener
+            val type = bundle.getString(CameraFragment.ARG_TYPE)
+                ?: return@setFragmentResultListener
 
-            shouldShowRequestPermissionRationale(Manifest.permission.CAMERA) -> {
-                MaterialAlertDialogBuilder(requireContext())
-                    .setTitle("Camera Permission")
-                    .setMessage("Camera access is needed to take photos and videos for your post.")
-                    .setPositiveButton("Grant") { _, _ ->
-                        cameraPermissionLauncher.launch(
-                            arrayOf(
-                                Manifest.permission.CAMERA,
-                                Manifest.permission.RECORD_AUDIO
-                            )
-                        )
-                    }
-                    .setNegativeButton("Cancel", null)
-                    .show()
-            }
-
-            else -> cameraPermissionLauncher.launch(
-                arrayOf(
-                    Manifest.permission.CAMERA,
-                    Manifest.permission.RECORD_AUDIO
-                )
-            )
+            selectedMedia.add(Pair(uri, type))
+            mediaPreviewAdapter.submitList(selectedMedia.toList())
+            updateMediaCount()
         }
-    }
-
-    private fun showCameraOptions() {
-        MaterialAlertDialogBuilder(requireContext())
-            .setTitle("Camera")
-            .setItems(arrayOf("Take Photo", "Record Video")) { _, which ->
-                when (which) {
-                    0 -> launchCameraPhoto()
-                    1 -> launchCameraVideo()
-                }
-            }
-            .show()
-    }
-
-    private fun launchCameraPhoto() {
-        val photoFile = File.createTempFile(
-            "photo_${System.currentTimeMillis()}",
-            ".jpg",
-            requireContext().externalCacheDir
-        )
-        cameraImageUri = FileProvider.getUriForFile(
-            requireContext(),
-            "${requireContext().packageName}.fileprovider",
-            photoFile
-        )
-        takePictureLauncher.launch(cameraImageUri!!)
-    }
-
-    private fun launchCameraVideo() {
-        val videoFile = File.createTempFile(
-            "video_${System.currentTimeMillis()}",
-            ".mp4",
-            requireContext().externalCacheDir
-        )
-        cameraVideoUri = FileProvider.getUriForFile(
-            requireContext(),
-            "${requireContext().packageName}.fileprovider",
-            videoFile
-        )
-        takeVideoLauncher.launch(cameraVideoUri!!)
     }
 
     // ─────────────────────────── ViewModel ───────────────────────────
@@ -348,8 +233,6 @@ class CreatePostFragment : Fragment() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        cameraImageUri?.let { outState.putParcelable(KEY_CAMERA_IMAGE_URI, it) }
-        cameraVideoUri?.let { outState.putParcelable(KEY_CAMERA_VIDEO_URI, it) }
         if (selectedMedia.isNotEmpty()) {
             outState.putParcelableArrayList(KEY_SELECTED_URIS, ArrayList(selectedMedia.map { it.first }))
             outState.putStringArrayList(KEY_SELECTED_TYPES, ArrayList(selectedMedia.map { it.second }))

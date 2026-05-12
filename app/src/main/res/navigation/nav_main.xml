@@ -32,12 +32,21 @@
         <action
             android:id="@+id/action_createPost_to_mediaPicker"
             app:destination="@id/mediaPickerFragment"/>
+
+        <action
+            android:id="@+id/action_createPost_to_camera"
+            app:destination="@id/cameraFragment"/>
     </fragment>
 
     <fragment
         android:id="@+id/mediaPickerFragment"
         android:name="com.connect.medium.ui.main.fragments.create.MediaPickerFragment"
         android:label="New Post"/>
+
+    <fragment
+        android:id="@+id/cameraFragment"
+        android:name="com.connect.medium.ui.main.fragments.create.CameraFragment"
+        android:label="Camera"/>
 
     <fragment
         android:id="@+id/notificationsFragment"

@@ -28,15 +28,6 @@ class MainActivity : AppCompatActivity() {
             .findFragmentById(R.id.main_nav_host) as NavHostFragment
         navController = navHostFragment.navController
 
-        val appBarConfig = AppBarConfiguration(
-            setOf(
-                R.id.homeFragment,
-                R.id.searchFragment,
-                R.id.notificationsFragment,
-                R.id.profileFragment
-            )
-        )
-
         binding.bottomNav.setupWithNavController(navController)
         binding.bottomNav.menu.findItem(R.id.placeholder)?.apply {
             isEnabled = false
@@ -47,7 +38,10 @@ class MainActivity : AppCompatActivity() {
 
         navController.addOnDestinationChangedListener { _, destination, _ ->
             when (destination.id) {
-                R.id.createPostFragment, R.id.settingsFragment, R.id.mediaPickerFragment -> {
+                R.id.createPostFragment,
+                R.id.settingsFragment,
+                R.id.mediaPickerFragment,
+                R.id.cameraFragment -> {
                     binding.fabCreate.hide()
                     binding.bottomNav.visibility = View.GONE
                 }

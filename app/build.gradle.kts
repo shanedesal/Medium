@@ -145,4 +145,12 @@ dependencies {
 
     // Image cropping (gallery picker crop feature)
     implementation("com.vanniktech:android-image-cropper:4.7.0")
+
+    // CameraX — in-app camera with 1:1 square ViewPort for photo and video capture
+    val camerax_version = "1.6.1"
+    implementation("androidx.camera:camera-core:$camerax_version")
+    implementation("androidx.camera:camera-camera2:$camerax_version")
+    implementation("androidx.camera:camera-lifecycle:$camerax_version")
+    implementation("androidx.camera:camera-video:$camerax_version")
+    implementation("androidx.camera:camera-view:$camerax_version")
 }
