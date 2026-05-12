@@ -143,6 +143,6 @@ dependencies {
     //gridlayout
     implementation("androidx.gridlayout:gridlayout:1.1.0")
 
-
-
+    // Image cropping (gallery picker crop feature)
+    implementation("com.vanniktech:android-image-cropper:4.7.0")
 }

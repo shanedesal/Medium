@@ -3,6 +3,7 @@
     xmlns:tools="http://schemas.android.com/tools"
     package="com.connect.medium">
 
+
     <uses-feature
         android:name="android.hardware.camera"
         android:required="false" />
@@ -11,6 +12,16 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <!-- Media access: API 33+ uses granular permissions; older API uses READ_EXTERNAL_STORAGE -->
+    <uses-permission
+        android:name="android.permission.READ_MEDIA_IMAGES"
+        android:minSdkVersion="33"/>
+    <uses-permission
+        android:name="android.permission.READ_MEDIA_VIDEO"
+        android:minSdkVersion="33"/>
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32"/>
 
 
 
@@ -37,6 +48,11 @@
             android:name=".ui.main.MainActivity"
             android:exported="false">
         </activity>
+        <!-- Override CropImageActivity theme to match app branding -->
+        <activity
+            android:name="com.canhub.cropper.CropImageActivity"
+            android:theme="@style/Theme.Connect.CropImage"
+            tools:replace="android:theme"/>
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

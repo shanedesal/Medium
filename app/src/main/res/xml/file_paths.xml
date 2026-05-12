@@ -2,4 +2,6 @@
 <paths>
     <external-cache-path name="my_images" path="." />
     <external-cache-path name="my_videos" path="." />
+    <!-- Internal cache used by CropImageActivity for cropped output files -->
+    <cache-path name="cropped_images" path="." />
 </paths>

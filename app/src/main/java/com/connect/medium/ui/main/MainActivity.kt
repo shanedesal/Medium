@@ -47,7 +47,7 @@ class MainActivity : AppCompatActivity() {
 
         navController.addOnDestinationChangedListener { _, destination, _ ->
             when (destination.id) {
-                R.id.createPostFragment, R.id.settingsFragment -> {
+                R.id.createPostFragment, R.id.settingsFragment, R.id.mediaPickerFragment -> {
                     binding.fabCreate.hide()
                     binding.bottomNav.visibility = View.GONE
                 }

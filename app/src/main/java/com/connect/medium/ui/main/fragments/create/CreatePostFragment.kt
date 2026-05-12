@@ -4,16 +4,16 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
-import androidx.fragment.app.Fragment
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
-import androidx.activity.result.ActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.result.registerForActivityResult
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.core.os.BundleCompat
+import androidx.fragment.app.Fragment
+import androidx.fragment.app.setFragmentResultListener
 import androidx.fragment.app.viewModels
 import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -22,57 +22,27 @@ import com.connect.medium.databinding.FragmentCreatePostBinding
 import com.connect.medium.ui.main.adapters.MediaPreviewAdapter
 import com.connect.medium.utils.Resource
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import kotlinx.coroutines.FlowPreview
 import java.io.File
 
-// TODO: Rename parameter arguments, choose names that match
-// the fragment initialization parameters, e.g. ARG_ITEM_NUMBER
-private const val ARG_PARAM1 = "param1"
-private const val ARG_PARAM2 = "param2"
-
-/**
- * A simple [Fragment] subclass.
- * Use the [CreatePostFragment.newInstance] factory method to
- * create an instance of this fragment.
- */
 class CreatePostFragment : Fragment() {
+
+    companion object {
+        private const val VIDEO_SIZE_LIMIT_BYTES = 50 * 1024 * 1024L
+    }
 
     private var _binding: FragmentCreatePostBinding? = null
     private val binding get() = _binding!!
+
     private val viewModel: CreatePostViewModel by viewModels {
         CreatePostViewModelFactory(requireActivity().application)
     }
+
     private val selectedMedia = mutableListOf<Pair<Uri, String>>()
     private lateinit var mediaPreviewAdapter: MediaPreviewAdapter
-    private var isToolbarExpanded = false
 
+    private var isToolbarExpanded = false
     private var cameraImageUri: Uri? = null
     private var cameraVideoUri: Uri? = null
-
-    private val pickMediaLauncher = registerForActivityResult(
-        ActivityResultContracts.OpenMultipleDocuments()
-    ) { uris ->
-        uris.forEach { uri ->
-            val type = requireContext().contentResolver.getType(uri) ?: ""
-            val mediaType = if (type.startsWith("video")) "video" else "image"
-
-            if (mediaType == "video") {
-                val fileSize = requireContext().contentResolver
-                    .openFileDescriptor(uri, "r")?.statSize ?: 0
-                if (fileSize > 50 * 1024 * 1024L) {
-                    Toast.makeText(
-                        requireContext(),
-                        "Video exceeds 50MB limit: ${fileSize / (1024 * 1024)}MB",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                    return@forEach
-                }
-            }
-            selectedMedia.add(Pair(uri, mediaType))
-        }
-        mediaPreviewAdapter.submitList(selectedMedia.toList())
-        updateMediaCount()
-    }
 
     private val takePictureLauncher = registerForActivityResult(
         ActivityResultContracts.TakePicture()
@@ -89,12 +59,11 @@ class CreatePostFragment : Fragment() {
     private val takeVideoLauncher = registerForActivityResult(
         ActivityResultContracts.CaptureVideo()
     ) { success ->
-
-        if(!success) return@registerForActivityResult
+        if (!success) return@registerForActivityResult
         cameraVideoUri?.let { uri ->
             val fileSize = requireContext().contentResolver
                 .openFileDescriptor(uri, "r")?.statSize ?: 0
-            if (fileSize > 50 * 1024 * 1024L) {
+            if (fileSize > VIDEO_SIZE_LIMIT_BYTES) {
                 Toast.makeText(
                     requireContext(),
                     "Video exceeds 50MB limit: ${fileSize / (1024 * 1024)}MB",
@@ -111,21 +80,16 @@ class CreatePostFragment : Fragment() {
     private val cameraPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
-        val cameraGranted = permissions[Manifest.permission.CAMERA] == true
-        val audioGranted = permissions[Manifest.permission.RECORD_AUDIO] == true
-        if (cameraGranted) {
+        if (permissions[Manifest.permission.CAMERA] == true) {
             showCameraOptions()
         } else {
-            Toast.makeText(
-                requireContext(),
-                "Camera permission is required",
-                Toast.LENGTH_SHORT
-            ).show()
+            Toast.makeText(requireContext(), "Camera permission is required", Toast.LENGTH_SHORT).show()
         }
     }
 
     override fun onCreateView(
-        inflater: LayoutInflater, container: ViewGroup?,
+        inflater: LayoutInflater,
+        container: ViewGroup?,
         savedInstanceState: Bundle?
     ): View {
         _binding = FragmentCreatePostBinding.inflate(inflater, container, false)
@@ -137,11 +101,13 @@ class CreatePostFragment : Fragment() {
         setupMediaPreview()
         setupClickListeners()
         observeViewModel()
+        listenForPickerResult()
     }
+
+    // ─────────────────────────── Setup ───────────────────────────
 
     private fun setupMediaPreview() {
         mediaPreviewAdapter = MediaPreviewAdapter { position ->
-            // remove item on X click
             selectedMedia.removeAt(position)
             mediaPreviewAdapter.submitList(selectedMedia.toList())
             updateMediaCount()
@@ -161,7 +127,7 @@ class CreatePostFragment : Fragment() {
         }
 
         binding.btnPickMedia.setOnClickListener {
-            pickMediaLauncher.launch(arrayOf("image/*", "video/*"))
+            findNavController().navigate(R.id.action_createPost_to_mediaPicker)
         }
 
         binding.btnCamera.setOnClickListener {
@@ -181,13 +147,50 @@ class CreatePostFragment : Fragment() {
             viewModel.createPost(selectedMedia.toList(), caption)
         }
     }
+
+    // ─────────────────────────── Gallery picker result ───────────────────────────
+
+    private fun listenForPickerResult() {
+        setFragmentResultListener(MediaPickerFragment.RESULT_KEY) { _, bundle ->
+            val uris = BundleCompat.getParcelableArrayList(
+                bundle, MediaPickerFragment.ARG_URIS, Uri::class.java
+            ) ?: return@setFragmentResultListener
+            val types = bundle.getStringArrayList(MediaPickerFragment.ARG_TYPES)
+                ?: return@setFragmentResultListener
+
+            selectedMedia.clear()
+
+            uris.forEachIndexed { index, uri ->
+                val type = types.getOrNull(index) ?: return@forEachIndexed
+                if (type == "video") {
+                    val fileSize = runCatching {
+                        requireContext().contentResolver.openFileDescriptor(uri, "r")?.statSize ?: 0L
+                    }.getOrDefault(0L)
+                    if (fileSize > VIDEO_SIZE_LIMIT_BYTES) {
+                        Toast.makeText(
+                            requireContext(),
+                            "Video exceeds 50MB limit: ${fileSize / (1024 * 1024)}MB",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        return@forEachIndexed
+                    }
+                }
+                selectedMedia.add(Pair(uri, type))
+            }
+
+            mediaPreviewAdapter.submitList(selectedMedia.toList())
+            updateMediaCount()
+        }
+    }
+
+    // ─────────────────────────── Camera ───────────────────────────
+
     private fun checkCameraPermissionAndOpen() {
         when {
             ContextCompat.checkSelfPermission(
                 requireContext(), Manifest.permission.CAMERA
-            ) == PackageManager.PERMISSION_GRANTED -> {
-                showCameraOptions()
-            }
+            ) == PackageManager.PERMISSION_GRANTED -> showCameraOptions()
+
             shouldShowRequestPermissionRationale(Manifest.permission.CAMERA) -> {
                 MaterialAlertDialogBuilder(requireContext())
                     .setTitle("Camera Permission")
@@ -203,14 +206,13 @@ class CreatePostFragment : Fragment() {
                     .setNegativeButton("Cancel", null)
                     .show()
             }
-            else -> {
-                cameraPermissionLauncher.launch(
-                    arrayOf(
-                        Manifest.permission.CAMERA,
-                        Manifest.permission.RECORD_AUDIO
-                    )
+
+            else -> cameraPermissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.CAMERA,
+                    Manifest.permission.RECORD_AUDIO
                 )
-            }
+            )
         }
     }
 
@@ -254,20 +256,7 @@ class CreatePostFragment : Fragment() {
         takeVideoLauncher.launch(cameraVideoUri!!)
     }
 
-    private fun toggleToolbar() {
-        isToolbarExpanded = !isToolbarExpanded
-        binding.expandedOptions.visibility =
-            if (isToolbarExpanded) View.VISIBLE else View.GONE
-        binding.btnExpand.setImageResource(
-            if (isToolbarExpanded) R.drawable.ic_expand_more else R.drawable.ic_expand_less
-        )
-    }
-
-    private fun updateMediaCount() {
-        binding.tvMediaCount.text = "${selectedMedia.size} item(s) selected"
-        binding.tvMediaCount.visibility =
-            if (selectedMedia.isEmpty()) View.GONE else View.VISIBLE
-    }
+    // ─────────────────────────── ViewModel ───────────────────────────
 
     private fun observeViewModel() {
         viewModel.uploadProgress.observe(viewLifecycleOwner) { progress ->
@@ -303,6 +292,23 @@ class CreatePostFragment : Fragment() {
                 }
             }
         }
+    }
+
+    // ─────────────────────────── Helpers ───────────────────────────
+
+    private fun toggleToolbar() {
+        isToolbarExpanded = !isToolbarExpanded
+        binding.expandedOptions.visibility =
+            if (isToolbarExpanded) View.VISIBLE else View.GONE
+        binding.btnExpand.setImageResource(
+            if (isToolbarExpanded) R.drawable.ic_expand_more else R.drawable.ic_expand_less
+        )
+    }
+
+    private fun updateMediaCount() {
+        binding.tvMediaCount.text = "${selectedMedia.size} item(s) selected"
+        binding.tvMediaCount.visibility =
+            if (selectedMedia.isEmpty()) View.GONE else View.VISIBLE
     }
 
     private fun clearForm() {

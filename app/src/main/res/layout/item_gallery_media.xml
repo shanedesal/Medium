@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <!-- Thumbnail (fills the entire square cell) -->
+    <ImageView
+        android:id="@+id/iv_thumbnail"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:contentDescription="@null"/>
+
+    <!-- Semi-transparent overlay, shown only for selected items in multi-select mode -->
+    <View
+        android:id="@+id/selection_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#66000000"
+        android:visibility="gone"/>
+
+    <!-- Numbered badge (multi-select) or check mark (single-select highlight) -->
+    <TextView
+        android:id="@+id/tv_selection_number"
+        android:layout_width="26dp"
+        android:layout_height="26dp"
+        android:layout_gravity="top|end"
+        android:layout_margin="5dp"
+        android:background="@drawable/bg_selection_circle"
+        android:gravity="center"
+        android:textColor="@android:color/white"
+        android:textSize="11sp"
+        android:textStyle="bold"
+        android:visibility="gone"/>
+
+    <!-- Video indicator in bottom-start corner -->
+    <ImageView
+        android:id="@+id/iv_video_indicator"
+        android:layout_width="18dp"
+        android:layout_height="18dp"
+        android:layout_gravity="bottom|start"
+        android:layout_margin="5dp"
+        android:src="@drawable/ic_play"
+        android:contentDescription="@null"
+        android:visibility="gone"
+        app:tint="@android:color/white"/>
+
+</FrameLayout>

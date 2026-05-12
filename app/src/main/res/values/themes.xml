@@ -16,4 +16,27 @@
         <item name="android:fontFamily">@font/instagram_sans</item>
         <item name="fontFamily">@font/instagram_sans</item>
     </style>
+
+    <!-- Theme for CropImageActivity — uses Material3 with ActionBar so the library's
+         Toolbar renders correctly; inherits brand colours from the main theme. -->
+    <style name="Theme.Connect.CropImage" parent="Theme.Material3.DayNight">
+        <item name="colorPrimary">@color/purple_500</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorSecondary">@color/purple_300</item>
+        <item name="colorOnSecondary">@color/white</item>
+        <item name="android:colorBackground">@color/background</item>
+        <item name="android:fontFamily">@font/instagram_sans</item>
+        <item name="fontFamily">@font/instagram_sans</item>
+        <!-- Force Toolbar icons and title text to white so they are visible on the
+             purple primary-coloured action bar regardless of light/dark mode. -->
+        <item name="actionBarTheme">@style/ThemeOverlay.Connect.ActionBar</item>
+    </style>
+
+    <!-- Overlay applied to the ActionBar/Toolbar inside Theme.Connect.CropImage.
+         colorControlNormal tints the rotate/flip vector icons; android:textColorPrimary
+         sets the title text colour. -->
+    <style name="ThemeOverlay.Connect.ActionBar" parent="ThemeOverlay.Material3">
+        <item name="android:textColorPrimary">@color/white</item>
+        <item name="colorControlNormal">@color/white</item>
+    </style>
 </resources>
