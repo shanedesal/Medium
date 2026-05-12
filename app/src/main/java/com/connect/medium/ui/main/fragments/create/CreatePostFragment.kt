@@ -28,6 +28,11 @@ class CreatePostFragment : Fragment() {
 
     companion object {
         private const val VIDEO_SIZE_LIMIT_BYTES = 50 * 1024 * 1024L
+        private const val KEY_CAMERA_IMAGE_URI = "key_camera_image_uri"
+        private const val KEY_CAMERA_VIDEO_URI = "key_camera_video_uri"
+        private const val KEY_SELECTED_URIS = "key_selected_uris"
+        private const val KEY_SELECTED_TYPES = "key_selected_types"
+        private const val KEY_TOOLBAR_EXPANDED = "key_toolbar_expanded"
     }
 
     private var _binding: FragmentCreatePostBinding? = null
@@ -98,10 +103,15 @@ class CreatePostFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        if (savedInstanceState != null) {
+            cameraImageUri = BundleCompat.getParcelable(savedInstanceState, KEY_CAMERA_IMAGE_URI, Uri::class.java)
+            cameraVideoUri = BundleCompat.getParcelable(savedInstanceState, KEY_CAMERA_VIDEO_URI, Uri::class.java)
+        }
         setupMediaPreview()
         setupClickListeners()
         observeViewModel()
         listenForPickerResult()
+        if (savedInstanceState != null) restoreState(savedInstanceState)
     }
 
     // ─────────────────────────── Setup ───────────────────────────
@@ -305,6 +315,24 @@ class CreatePostFragment : Fragment() {
         )
     }
 
+    private fun restoreState(savedInstanceState: Bundle) {
+        val uris = BundleCompat.getParcelableArrayList(savedInstanceState, KEY_SELECTED_URIS, Uri::class.java)
+        val types = savedInstanceState.getStringArrayList(KEY_SELECTED_TYPES)
+        if (uris != null && types != null) {
+            selectedMedia.clear()
+            uris.forEachIndexed { index, uri ->
+                types.getOrNull(index)?.let { type -> selectedMedia.add(Pair(uri, type)) }
+            }
+            mediaPreviewAdapter.submitList(selectedMedia.toList())
+            updateMediaCount()
+        }
+        isToolbarExpanded = savedInstanceState.getBoolean(KEY_TOOLBAR_EXPANDED, false)
+        binding.expandedOptions.visibility = if (isToolbarExpanded) View.VISIBLE else View.GONE
+        binding.btnExpand.setImageResource(
+            if (isToolbarExpanded) R.drawable.ic_expand_more else R.drawable.ic_expand_less
+        )
+    }
+
     private fun updateMediaCount() {
         binding.tvMediaCount.text = "${selectedMedia.size} item(s) selected"
         binding.tvMediaCount.visibility =
@@ -316,6 +344,17 @@ class CreatePostFragment : Fragment() {
         mediaPreviewAdapter.submitList(emptyList())
         binding.etCaption.text?.clear()
         binding.tvMediaCount.visibility = View.GONE
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        cameraImageUri?.let { outState.putParcelable(KEY_CAMERA_IMAGE_URI, it) }
+        cameraVideoUri?.let { outState.putParcelable(KEY_CAMERA_VIDEO_URI, it) }
+        if (selectedMedia.isNotEmpty()) {
+            outState.putParcelableArrayList(KEY_SELECTED_URIS, ArrayList(selectedMedia.map { it.first }))
+            outState.putStringArrayList(KEY_SELECTED_TYPES, ArrayList(selectedMedia.map { it.second }))
+        }
+        outState.putBoolean(KEY_TOOLBAR_EXPANDED, isToolbarExpanded)
     }
 
     override fun onDestroyView() {

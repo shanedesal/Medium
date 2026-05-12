@@ -13,6 +13,7 @@ import android.view.View
 import android.view.ViewGroup
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.core.os.BundleCompat
 import androidx.core.view.doOnLayout
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.setFragmentResult
@@ -40,6 +41,7 @@ class MediaPickerFragment : Fragment() {
 
         private const val GRID_SPAN_COUNT = 3
         private const val GRID_SPACING_DP = 2
+        private const val KEY_PENDING_CROP_URI = "key_pending_crop_uri"
 
         // Fixed decode size for the preview image. Using a constant rather than the
         // ImageView's live dimensions keeps Glide's disk-cache key stable across
@@ -93,6 +95,9 @@ class MediaPickerFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        if (savedInstanceState != null) {
+            pendingCropOriginalUri = BundleCompat.getParcelable(savedInstanceState, KEY_PENDING_CROP_URI, Uri::class.java)
+        }
         setupGalleryGrid()
         setupClickListeners()
         observeViewModel()
@@ -284,6 +289,11 @@ class MediaPickerFragment : Fragment() {
                 data = Uri.fromParts("package", requireContext().packageName, null)
             }
         )
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        pendingCropOriginalUri?.let { outState.putParcelable(KEY_PENDING_CROP_URI, it) }
     }
 
     override fun onDestroyView() {
