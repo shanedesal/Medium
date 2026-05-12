@@ -1,0 +1,171 @@
+---
+description: Project-wide coding standards — MVVM architecture, separation of concerns, Kotlin style, lint hygiene, and formatting rules for the Medium Android app.
+alwaysApply: true
+---
+
+# Coding Standards
+
+## Architecture — MVVM + Clean Layers
+
+Strictly enforce three layers. **Never** let a layer reach across its boundary.
+
+| Layer | Allowed to know about |
+|---|---|
+| **View** (`ui/…Fragment`, `ui/…Activity`, `adapters/`) | ViewModel only — observe `LiveData`, call ViewModel methods |
+| **ViewModel** (`ui/…ViewModel`) | Repository only — no `Context` unless unavoidable (`AndroidViewModel`) |
+| **Data** (`data/repository/`, `data/remote/`, `data/local/`) | Data sources only — no Android UI imports |
+
+```kotlin
+// ❌ BAD — Fragment directly touches a repository
+class HomeFragment : Fragment() {
+    private val repo = PostRepository()
+    fun load() { repo.getPosts() }
+}
+
+// ✅ GOOD — Fragment observes ViewModel
+class HomeFragment : Fragment() {
+    private val vm: HomeViewModel by activityViewModels { HomeViewModelFactory(...) }
+    override fun onViewCreated(...) {
+        vm.posts.observe(viewLifecycleOwner) { render(it) }
+    }
+}
+```
+
+## Separation of Concerns
+
+- **Fragments / Activities** — only UI logic: binding, navigation, observing LiveData, showing dialogs/toasts.
+- **ViewModels** — only business / presentation logic: state management, coroutine launching, calling repositories.
+- **Repositories** — only data coordination: deciding between remote and local cache, mapping entities → domain models.
+- **Data sources** (`FirestoreDataSource`, `*Dao`) — raw data access only; no business logic.
+- **Utils** — pure helpers with no side effects; avoid placing logic here that belongs in a ViewModel or Repository.
+
+## Resource Wrapper — Use for All Async Results
+
+Always return `Resource<T>` from repositories and expose it via `LiveData` in ViewModels.
+
+```kotlin
+// ✅ Repository
+suspend fun getPost(id: String): Resource<Post> = try {
+    Resource.Success(remote.fetchPost(id))
+} catch (e: Exception) {
+    Resource.Error(e.localizedMessage ?: "Unknown error")
+}
+
+// ✅ ViewModel
+fun loadPost(id: String) {
+    viewModelScope.launch {
+        _post.value = Resource.Loading()
+        _post.value = repository.getPost(id)
+    }
+}
+```
+
+## View Binding
+
+Always use the nullable backing field pattern. Never hold a binding reference beyond `onDestroyView`.
+
+```kotlin
+// ✅ GOOD
+private var _binding: FragmentHomeBinding? = null
+private val binding get() = _binding!!
+
+override fun onCreateView(...): View {
+    _binding = FragmentHomeBinding.inflate(inflater, container, false)
+    return binding.root
+}
+
+override fun onDestroyView() {
+    super.onDestroyView()
+    _binding = null
+}
+```
+
+## Coroutines
+
+- Launch coroutines from `viewModelScope` in ViewModels only.
+- Use `Dispatchers.IO` for database/network, `Dispatchers.Main` for UI updates.
+- Prefer `Flow` in repositories; collect in ViewModels using `asLiveData()` or explicit `launch`.
+- Cancel jobs explicitly when replacing them (pagination, search).
+
+```kotlin
+// ✅ Cancel previous job before launching a new one
+private var fetchJob: Job? = null
+fun refresh() {
+    fetchJob?.cancel()
+    fetchJob = viewModelScope.launch { ... }
+}
+```
+
+## Kotlin Style
+
+- Follow `kotlin.code.style=official` (already set in `gradle.properties`).
+- Prefer `val` over `var`; use `var` only when mutation is required.
+- Use named arguments for calls with 3+ parameters.
+- No magic numbers — declare as named `const val` or `companion object` constants.
+- Remove all unused `ARG_PARAM1 / ARG_PARAM2` Fragment wizard remnants.
+- No `!!` outside of the View Binding getter pattern; use `?: return`, `let`, or `requireNotNull`.
+
+```kotlin
+// ❌ BAD
+val user = getUser()!!
+
+// ✅ GOOD
+val user = getUser() ?: return
+```
+
+## Naming Conventions
+
+| Kind | Convention | Example |
+|---|---|---|
+| Classes / Objects | PascalCase | `PostRepository`, `HomeFragment` |
+| Functions / properties | camelCase | `fetchPosts()`, `isLoading` |
+| Constants | SCREAMING_SNAKE_CASE | `MAX_PAGE_SIZE` |
+| Layout files | `fragment_*`, `item_*`, `activity_*` | `fragment_home.xml` |
+| Drawable / icons | `ic_*`, `bg_*`, `img_*` | `ic_like.xml` |
+| LiveData backing field | `_name` (private mutable) + `name` (public immutable) | `_posts` / `posts` |
+
+## Formatting & Spacing
+
+- Indent: **4 spaces** (no tabs).
+- Max line length: **120 characters**.
+- One blank line between class members; two blank lines between top-level declarations.
+- Opening brace on the **same line**; closing brace on its own line.
+- No trailing whitespace.
+- Section dividers (`// ─────`) are acceptable but keep them consistent; prefer them only in large files.
+
+## Lint
+
+- **Zero lint errors** — fix every `error`-level lint issue before committing.
+- Address `warning`-level issues unless suppressing with a documented `@SuppressLint` reason.
+- Never suppress lint without an inline comment explaining why.
+
+```kotlin
+// ❌ BAD
+@SuppressLint("SetTextI18n")
+fun bind() { label.text = "Page " + page }
+
+// ✅ GOOD — or better: use string resources
+@SuppressLint("SetTextI18n") // concatenation is non-translatable by design; numeric suffix
+fun bind() { label.text = "Page $page" }
+```
+
+## Dependency Injection
+
+The project uses manual construction (no Hilt/Dagger). Until a DI framework is introduced:
+
+- Instantiate dependencies in `*ViewModelFactory`, **not** inside the ViewModel body.
+- Pass repositories as constructor parameters to ViewModels.
+- Never call `AppDatabase.getInstance(context)` inside a Fragment.
+
+## Logging
+
+- Use `Log.d/e/w` with a consistent `TAG` constant per class.
+- Remove or guard debug logs behind `BuildConfig.DEBUG` before merging.
+- Avoid emoji in log messages — they hinder log filtering in Logcat.
+
+```kotlin
+companion object { private const val TAG = "HomeViewModel" }
+
+// ✅
+if (BuildConfig.DEBUG) Log.d(TAG, "Posts loaded: ${posts.size}")
+```
