@@ -7,17 +7,19 @@
 
     <androidx.camera.view.PreviewView
         android:id="@+id/previewView"
-        android:layout_width="0dp"
+        android:layout_width="match_parent"
         android:layout_height="0dp"
         app:scaleType="fillCenter"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintBottom_toTopOf="@+id/bottomControls"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintDimensionRatio="2:3" />
+        app:layout_constraintVertical_chainStyle="packed"
+        app:flow_verticalBias="0"/>
 
     <com.connect.medium.ui.main.fragments.create.CropOverlayView
         android:id="@+id/cropOverlay"
-        android:layout_width="0dp"
+        android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layerType="software"
         app:layout_constraintStart_toStartOf="@id/previewView"
@@ -97,40 +99,16 @@
         android:id="@+id/bottomControls"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:minHeight="120dp"
         android:background="@color/purple_800"
-        android:paddingTop="32dp"
+        android:paddingTop="16dp"
         android:paddingBottom="32dp"
         android:paddingStart="16dp"
         android:paddingEnd="16dp"
+        app:layout_constraintTop_toBottomOf="@+id/previewView"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent">
 
-        <!--
-            Horizontal centre guideline — used to centre the capture button
-            and to position the gallery/flash side buttons symmetrically.
-        -->
-        <androidx.constraintlayout.widget.Guideline
-            android:id="@+id/guidelineCenter"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            app:layout_constraintGuide_percent="0.5" />
-
-        <!--
-            Vertical guideline — anchors the capture button row.
-            Using guide_end so spacing from the bottom of the controls bar
-            is consistent regardless of bar height.
-        -->
-        <androidx.constraintlayout.widget.Guideline
-            android:id="@+id/guidelineBottom"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            app:layout_constraintGuide_end="8dp" />
-
-        <!-- Photo / Video mode toggle -->
         <com.google.android.material.tabs.TabLayout
             android:id="@+id/tabMode"
             android:layout_width="0dp"
@@ -164,11 +142,6 @@
 
         </com.google.android.material.tabs.TabLayout>
 
-        <!--
-            Capture button: centred via guidelineCenter, sits above the
-            guidelineBottom anchor. Square enforced via dimensionRatio="1:1".
-            Scales with screen width, clamped between 64dp and 96dp.
-        -->
         <View
             android:id="@+id/btnCapture"
             android:layout_width="0dp"
@@ -179,15 +152,14 @@
             android:focusable="true"
             android:foreground="?attr/selectableItemBackgroundBorderless"
             app:layout_constraintTop_toBottomOf="@id/tabMode"
-            app:layout_constraintBottom_toTopOf="@id/guidelineBottom"
-            app:layout_constraintStart_toStartOf="@id/guidelineCenter"
-            app:layout_constraintEnd_toEndOf="@id/guidelineCenter"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintDimensionRatio="1:1"
             app:layout_constraintWidth_percent="0.20"
             app:layout_constraintWidth_min="64dp"
             app:layout_constraintWidth_max="96dp" />
 
-        <!-- Gallery thumbnail button — left of capture -->
         <ImageButton
             android:id="@+id/btnGallery"
             style="?attr/borderlessButtonStyle"
@@ -199,13 +171,12 @@
             app:backgroundTint="@null"
             android:contentDescription="Open gallery"
             app:tint="#FFFFFF"
-            app:layout_constraintEnd_toStartOf="@id/btnCapture"
-            app:layout_constraintBottom_toTopOf="@id/guidelineBottom"
             app:layout_constraintTop_toTopOf="@id/btnCapture"
+            app:layout_constraintBottom_toBottomOf="@id/btnCapture"
+            app:layout_constraintEnd_toStartOf="@id/btnCapture"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintHorizontal_bias="0.5" />
 
-        <!-- Flash toggle button — right of capture -->
         <ImageButton
             android:id="@+id/btnFlash"
             style="?attr/borderlessButtonStyle"
@@ -217,9 +188,9 @@
             app:backgroundTint="@null"
             android:contentDescription="Toggle flash"
             app:tint="#FFFFFF"
-            app:layout_constraintStart_toEndOf="@id/btnCapture"
-            app:layout_constraintBottom_toTopOf="@id/guidelineBottom"
             app:layout_constraintTop_toTopOf="@id/btnCapture"
+            app:layout_constraintBottom_toBottomOf="@id/btnCapture"
+            app:layout_constraintStart_toEndOf="@id/btnCapture"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintHorizontal_bias="0.5" />
 
