@@ -1,10 +1,16 @@
 package com.connect.medium.ui.main.fragments.create
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import android.net.Uri
 import android.os.Bundle
+import android.util.AttributeSet
 import android.util.Log
 import android.util.Rational
 import android.view.LayoutInflater
@@ -331,5 +337,36 @@ class CameraFragment : Fragment() {
         super.onDestroyView()
         requireActivity().requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         _binding = null
+    }
+}
+
+class CropOverlayView @JvmOverloads constructor(
+    context: Context, attrs: AttributeSet? = null
+) : View(context, attrs) {
+
+    private val dimPaint = Paint().apply {
+        color = 0xAA000000.toInt()
+    }
+    private val clearPaint = Paint().apply {
+        xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
+    }
+    private val borderPaint = Paint().apply {
+        color = 0xAAFFFFFF.toInt()
+        style = Paint.Style.STROKE
+        strokeWidth = 2f * resources.displayMetrics.density
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        val size = minOf(width, height).toFloat()
+        val left = (width - size) / 2f
+        val top = (height - size) / 2f
+
+        // dim the whole view first
+        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), dimPaint)
+        // punch out the square
+        canvas.drawRect(left, top, left + size, top + size, clearPaint)
+        // draw border around square
+        canvas.drawRect(left, top, left + size, top + size, borderPaint)
     }
 }
